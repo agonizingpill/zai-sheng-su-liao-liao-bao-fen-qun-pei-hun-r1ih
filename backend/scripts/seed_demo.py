@@ -6,6 +6,7 @@ from src.models import User,Bale,Blend,BlendPortion
 from src.quality_models import SupplierLot,LotBale,PelletCheck
 from src.blending import obj
 from src.production_models import Dryer,DryingRun,PelletPack,BlendShipment,ShipmentPack
+from src.stocktake_models import StocktakeSession,StocktakeRetest,StocktakeCandidate,StocktakePairing,StocktakeRetagBatch,StocktakeRetag
 from src.security import password_hash
 
 def seed():
@@ -32,5 +33,5 @@ def seed():
                 bale=s.scalar(select(Bale).where(Bale.code==bale_code))
                 if not s.scalar(select(LotBale.id).where(LotBale.bale_id==bale.id)):
                     s.add(LotBale(lot_id=lot.id,bale_id=bale.id,received_snapshot=obj(bale)))
-    with Session() as s:print(json.dumps({k:s.scalar(select(func.count()).select_from(v)) for k,v in [('users',User),('bales',Bale),('blends',Blend),('portions',BlendPortion),('supplier_lots',SupplierLot),('lot_bales',LotBale),('pellet_checks',PelletCheck),('dryers',Dryer),('drying_runs',DryingRun),('packs',PelletPack),('shipments',BlendShipment),('shipment_packs',ShipmentPack)]}))
+    with Session() as s:print(json.dumps({k:s.scalar(select(func.count()).select_from(v)) for k,v in [('users',User),('bales',Bale),('blends',Blend),('portions',BlendPortion),('supplier_lots',SupplierLot),('lot_bales',LotBale),('pellet_checks',PelletCheck),('dryers',Dryer),('drying_runs',DryingRun),('packs',PelletPack),('shipments',BlendShipment),('shipment_packs',ShipmentPack),('stocktakes',StocktakeSession),('stocktake_retests',StocktakeRetest),('stocktake_candidates',StocktakeCandidate),('stocktake_pairings',StocktakePairing),('stocktake_retags',StocktakeRetag)]}))
 if __name__=='__main__':seed()

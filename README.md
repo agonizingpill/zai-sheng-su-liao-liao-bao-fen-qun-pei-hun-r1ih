@@ -35,6 +35,7 @@ docker compose exec -T backend python -m scripts.seed_demo
 8. 烘干含水复检：主管登记Dryer设备，released配方开DryingRun，设备行锁核时段，配方唯一作业；投入含水由称料质量快照加权计算。含水>0.05%记redry，延烘结束不可倒退且须重查设备后续占用；复测≤0.05%记passed，主管验收accepted后才允许成品新签证，证书加入烘干快照；旧certified不重算。
 9. 包装箱码追溯：certified成品按唯一箱码分包，锁同成品校验有效包装累计≤actual_kg；open可改重或取消释放额度，sealed后冻结，证书快照随箱保存。已装车仍计入累计，避免重复包装同一产出。
 10. 装车客户签收：同车只能装同配方sealed箱，ShipmentPack.pack_id唯一，加载后包状态loaded阻止再次出库；主管发车保存冻结manifest。实收与清单差率绝对值>0.5%须至少8字依据，记录客户签收快照后不得重复签收。仅本地记录交接，无实际运输消息。
+11. 堆场盘点脱签配对：盘点单内存量盘点。带签料包复测（实测重量、MI、水分、PVC）计算「实测−台账」偏差，按四项特征等权学习均值与样本标准差；不足2次复测时用默认离散度，标准差设下限。无签料包按现场标记登记后，与**尚未点账**的料包做整批一对一最优指派（Hungarian），每包只配一次；距离>3σ或与次优候选接近（距离比<1.5）记`review`留待人工核对，无剩余料包可配记`unpaired`。人工改配必须≥8字依据，被占用的目标料包与该无签包互换，仍保证一对一。补签确认整批全有或全无：先锁盘点单与配对行，再按料包ID顺序`FOR UPDATE`（与放行同序）；任一所选料包余量相对配对时快照有变则整批409退回、不写任何补签，需重新配对。同一幂等键重试返回首次结果，不重复补签；已补签不可改配或重复确认。只有`matched`可补签，`review`/`unpaired`必须先人工处理；仍有未决配对时不能结束盘点。补签只记录身份恢复与依据快照，不改写料包重量、质量或分群，盘点期间投料照常。
 
 已被任何配方引用的料包质量/原始重量不得修改；可用量只在放行扣减。重做全场分群会更新堆场当前群号，既有配方继续使用原称料时的质量/群号快照。对旧快照配方添加新版本料包会被审秤拦截，需退回并整体重新称料。
 
@@ -45,6 +46,8 @@ docker compose exec -T backend python -m scripts.seed_demo
 17:00在「供应隔离复核」查看SL-ACCEPT-17（PET-129可用）与SL-HOLD-17（PET-131隔离），将新批SL-03关联PET-124；先审秤后隔离，再尝试最终投料，应实时拒绝且不扣料。主管按复检说明解除后方可投料。17:30已投料100kg配方的成品取样96kg、MI9.1、PVC65ppm，超过40ppm记隔离；清线复检24ppm，主管发合格证。初次65ppm、复检24ppm和投料快照全部保留。
 
 V3演练：11月24日DRY-B接BL-PELLET-UI的100kg投料，08:00—12:00烘干；实测0.04%，主管验收后成品96kg/20ppm才签证。包装PK-BROWSER-V3为25kg，封箱后放入SH-BROWSER-V3，客户华远注塑一号原料库，主管发车，客户签24.9kg，差率-0.4%保存。API另演练0.08%延烘、撞时段拒绝、包装超重/取消释放及超签收差异说明。
+
+盘点演练：开ST-20261121，对三只仍带签的料包复测（如PET-117实测498.5kg，平台读数偏低），系统学出重量/快检偏差；登记垛位YARD-A、YARD-B两只无签包，整批配对得到一对明确、一对待人工核对。此时主管照常放行一份争用同一料包的配方，再确认补签——整批因余量已变被拒，无任何补签写入；重新整批配对后余量快照更新，补签一次成功。用同一幂等键重试只返回首次结果；换一组配对复用该键被拒。人工改配必须填依据，互换后仍一对一。
 
 ## 真实ML计算
 
@@ -66,7 +69,9 @@ V3演练：11月24日DRY-B接BL-PELLET-UI的100kg投料，08:00—12:00烘干；
 
 V3 `backend/src/production_models.py`定义Dryer/DryingRun/PelletPack/BlendShipment/ShipmentPack；`production_schemas.py`校验时间、含水、称重与客户收货；`production_service.py`设备锁/时段重叠、累计包装锁、装车唯一和签收差率；`production_routes.py`提供`/dryers`、`/drying-runs`、`/pellet-packs`、`/blend-shipments`。新加5张表，原表列无变更，create_all兼容历史记录。
 
-`frontend/src/pages/yard.js`堆场；`clusters.js`真实散点与中心；`bench.js`可增删称料行；`release.js`交接簿；`lots.js`供应隔离复核；`pellets.js`粒料检验与证书；`drying.js`含水复检；`packs.js`包装箱码；`shipments.js`装车客户签收。`components/labels.js`共享群标签、状态条、标签页、标题与通知，群标签在图谱、秤台与放行中复用。`utils/api.js`会话/接口/store，`utils/format.js`数字/转义/上海时区。角色、配方状态、供应批、成品检验、烘干、包装和装车状态枚举定义在`backend/src/constants.py`、`frontend/src/constants.js`，状态实际转移在`blending.py`与`main.py`，标签渲染在`components/labels.js`。
+`backend/src/stocktake_models.py`定义StocktakeSession/StocktakeRetest/StocktakeCandidate/StocktakePairing/StocktakeRetagBatch/StocktakeRetag；`stocktake_schemas.py`校验复测与无签包快检字段、人工依据和幂等键；`stocktake_service.py`做偏差学习、Hungarian整批指派、人工互换、整批补签与行锁余量复核；`stocktake_routes.py`提供`/stocktakes`（含retests/candidates/pair/retag/close）。新加6张表，原表列无变更。
+
+`frontend/src/pages/yard.js`堆场与盘点配对；`clusters.js`真实散点与中心；`bench.js`可增删称料行；`release.js`交接簿；`lots.js`供应隔离复核；`pellets.js`粒料检验与证书；`drying.js`含水复检；`packs.js`包装箱码；`shipments.js`装车客户签收。`components/labels.js`共享群标签、状态条、标签页、标题与通知，群标签在图谱、秤台与放行中复用。`utils/api.js`会话/接口/store，`utils/format.js`数字/转义/上海时区。角色、配方状态、供应批、成品检验、烘干、包装、装车和盘点配对状态枚举定义在`backend/src/constants.py`、`frontend/src/constants.js`，状态实际转移在`blending.py`与`main.py`，标签渲染在`components/labels.js`。
 
 Compose恰好frontend/backend/worker/db/redis五服务，全部healthcheck。MySQL健康检查采用127.0.0.1业务账号SELECT1，避开初始化临时socket；前端和后端也用127.0.0.1。数据库、Redis和模型文件/心跳分别为命名卷。宿主默认地址池已用尽，本项目显式10.221.26.0/24；换环境冲突时调整networks。环境变量见.env.example：COMPOSE_PROJECT_NAME、FRONTEND_PORT、BACKEND_PORT、DB_PORT、JWT_SECRET。内网DATABASE_URL/REDIS_URL/SEED_DEMO由Compose设置。
 
@@ -74,6 +79,6 @@ Compose恰好frontend/backend/worker/db/redis五服务，全部healthcheck。MyS
 
 ## 已知范围
 
-模拟45包检验资料，不接地磅/化验仪；无物理投料设备联动。配方与成品以PVC、重量平衡为硬门限，成品记录正值MI，未加入具体产品应用的MI/水分区间。供应来料隔离不追溯撤销已经投料和已经签发的成品证书；历史快照保留。成品包装与装车在本地记录受控出库清单，不接外部仓储或销售财务。烘干每配方一单，含水按实际取样手录，不接设备传感器或能耗表；设备时段包括已验收历史，不能重叠回填。未实现封箱拆包/已发车撤销，避免不受控重复出库。一个worker、Redis list；取任务后worker异常退出无可靠重投。每次聚类在全场已检验料包上计算，分群是辅助选料，不替代检测。历史已放行配方不可撤销，避免演示中不受控返库。演示JWT secret与账号密码在正式部署前更换。
+模拟45包检验资料，不接地磅/化验仪；无物理投料设备联动。配方与成品以PVC、重量平衡为硬门限，成品记录正值MI，未加入具体产品应用的MI/水分区间。供应来料隔离不追溯撤销已经投料和已经签发的成品证书；历史快照保留。成品包装与装车在本地记录受控出库清单，不接外部仓储或销售财务。烘干每配方一单，含水按实际取样手录，不接设备传感器或能耗表；设备时段包括已验收历史，不能重叠回填。未实现封箱拆包/已发车撤销，避免不受控重复出库。一个worker、Redis list；取任务后worker异常退出无可靠重投。每次聚类在全场已检验料包上计算，分群是辅助选料，不替代检测。历史已放行配方不可撤销，避免演示中不受控返库。盘点配对只在本次盘点单内有效：偏差模型不持久化为质检结论，补签不写入料包质量、原始重量、可用量或分群，也不追溯更改已投料配方快照；复测与配对不阻断投料，仅补签确认时按料包行锁与放行串行并复核余量。演示JWT secret与账号密码在正式部署前更换。
 
 License: MIT.

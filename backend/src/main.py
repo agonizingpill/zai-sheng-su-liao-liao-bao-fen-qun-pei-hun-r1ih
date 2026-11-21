@@ -27,6 +27,8 @@ from .quality_routes import router as quality_router
 app.include_router(quality_router)
 from .production_routes import router as production_router
 app.include_router(production_router)
+from .stocktake_routes import router as stocktake_router
+app.include_router(stocktake_router)
 @app.exception_handler(IntegrityError)
 async def duplicate(request,e):return JSONResponse({'detail':'编号已存在或关联数据不合法'},status_code=409)
 @app.get('/health')

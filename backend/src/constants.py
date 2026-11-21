@@ -7,3 +7,6 @@ PELLET_STATES=('quarantine','passed','certified')
 DRYING_STATES=('drying','redry','passed','accepted')
 PACK_STATES=('open','sealed','cancelled','loaded')
 SHIPMENT_STATES=('loading','dispatched','received')
+
+STOCKTAKE_STATES=('open','closed')
+PAIRING_STATES=('matched','review','unpaired','paired')
